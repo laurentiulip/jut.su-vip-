@@ -25,9 +25,14 @@
   border: none;
   padding: 0;
   color: white;
-  background-color: #485f4880;
+  background-color: #4caf4f75;
   width: 60%;
   height: 100%;
+  font-size: 1.2em;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .extension-overlay-exit-button {
