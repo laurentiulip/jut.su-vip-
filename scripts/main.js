@@ -329,9 +329,7 @@ class JutsuExtension {
     const isProduction = window.location.protocol === 'https:' || 
                         window.location.hostname !== 'localhost';
     
-    const wsUrl = isProduction 
-        ? 'wss://your-app-name.onrender.com'  // Vei schimba asta după deploy
-        : 'ws://localhost:3000';
+    const wsUrl = 'wss://jut-su-vip.onrender.com/';
 
         try {
         this.ws = new WebSocket(wsUrl);
