@@ -217,6 +217,12 @@ const jutsuExtensionButtonsConfig = {
     labelText: locales.clickToFullScreen,
     group: null,
     defaultSettings: false,
+  },
+  roomControls: {
+    type: 'checkbox',
+    labelText: 'Room Controls',
+    group: null,
+    defaultSettings: false,
   }
 };
 
@@ -265,3 +271,19 @@ buttons.forEach(e => {
 const extension = new Extension(buttons, jutsuExtensionDefaultConfig);
 
 extension.setData();
+
+// Add room controls functionality
+document.getElementById('roomControls').addEventListener('change', () => {
+  chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+    const currentTab = tabs[0];
+    if (currentTab.url.includes('jut.su')) {
+      chrome.tabs.sendMessage(currentTab.id, {action: 'toggleRoomControls'}, (response) => {
+        if (chrome.runtime.lastError) {
+          console.error('Error sending message:', chrome.runtime.lastError);
+        }
+      });
+    } else {
+      alert('Please navigate to jut.su to use room controls');
+    }
+  });
+});

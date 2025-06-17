@@ -16,7 +16,29 @@ class JutsuExtension {
     this.isReconnecting = false;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
+    this.videoEventListeners = [];
+    this.urlMonitorInterval = null;
     this.loadRoomState();
+
+    // Add message listener for popup communication
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+      if (request.action === 'toggleRoomControls') {
+        const existingControls = document.querySelector('.room-controls-container');
+        if (existingControls) {
+          if (existingControls.style.display === 'none') {
+            existingControls.style.display = 'block';
+          } else {
+            existingControls.style.display = 'none';
+          }
+        } else {
+          this.createSyncControls();
+          const newControls = document.querySelector('.room-controls-container');
+          if (newControls) {
+            newControls.style.display = 'block';
+          }
+        }
+      }
+    });
   }
 
   loadRoomState() {
@@ -122,7 +144,7 @@ class JutsuExtension {
     video.play();
   }
 
-  checkVideo() {
+  checkVideo(callback = null) {
     const checkVideoElemOnPage = setInterval(() => {
       const video = document.getElementById("my-player_html5_api");
       if (video) {
@@ -131,6 +153,10 @@ class JutsuExtension {
         this.checkForFullScreenButton();
         if (this.config.videoFromStart) {
           this.videoFromStart(video);
+        }
+        // Execută callback-ul dacă există
+        if (callback) {
+          callback();
         }
       }
     }, 100);
@@ -322,6 +348,18 @@ class JutsuExtension {
               roomId: this.roomId
             }));
           }
+          
+          // Pentru host după refresh, inițializează sincronizarea
+          if (this.isHost) {
+            setTimeout(() => {
+              this.checkVideo(() => {
+                this.setupVideoSync();
+                this.isReconnecting = false;
+              });
+            }, 500);
+          } else {
+            this.isReconnecting = false;
+          }
         }
       };
 
@@ -354,6 +392,35 @@ class JutsuExtension {
               this.clientId = data.clientId;
               this.saveRoomState();
               this.updateRoomInfo();
+              
+              // Dacă este o reconectare după refresh și suntem host
+              if (data.isReconnection && this.isHost) {
+                this.checkVideo(() => {
+                  this.setupVideoSync();
+                });
+              }
+              break;
+
+            case 'user_reconnected':
+              this.connectedUsers.add(data.clientId);
+              this.updateRoomInfo();
+              console.log('User reconnected:', data.clientId);
+              break;
+
+            case 'host_reconnected':
+              console.log('Host reconnected');
+              // Forțează o sincronizare pentru că host-ul s-a reconectat
+              setTimeout(() => {
+                const video = document.getElementById("my-player_html5_api");
+                if (video && this.ws && this.ws.readyState === WebSocket.OPEN) {
+                  this.ws.send(JSON.stringify({
+                    type: 'sync',
+                    action: video.paused ? 'pause' : 'play',
+                    time: video.currentTime,
+                    url: window.location.href
+                  }));
+                }
+              }, 1000);
               break;
 
             case 'user_joined':
@@ -376,6 +443,9 @@ class JutsuExtension {
             case 'url_change':
               if (data.url !== window.location.href && !this.isReconnecting) {
                 window.location.href = data.url;
+              } else if (data.url === window.location.href) {
+                // Dacă suntem deja pe URL-ul corect, doar reinițializează sincronizarea
+                this.reinitializeSync();
               }
               break;
 
@@ -435,6 +505,8 @@ class JutsuExtension {
     controlsDiv.style.borderRadius = '5px';
     controlsDiv.style.color = 'white';
     controlsDiv.style.minWidth = '200px';
+    controlsDiv.style.display = 'none'; // Ascunde controalele implicit
+    controlsDiv.classList.add('room-controls-container');
 
     // Room info section
     const roomInfo = document.createElement('div');
@@ -574,9 +646,31 @@ class JutsuExtension {
     }
   }
 
+  reinitializeSync() {
+    if (this.roomId && this.ws && this.ws.readyState === WebSocket.OPEN) {
+      // Curăță sincronizarea existentă
+      if (this.syncInterval) {
+        clearInterval(this.syncInterval);
+      }
+      
+      // Verifică din nou video-ul și reinițializează sincronizarea
+      this.checkVideo(() => {
+        this.setupVideoSync();
+      });
+    }
+  }
+
   setupVideoSync() {
     const video = document.getElementById("my-player_html5_api");
     if (!video) return;
+
+    // Curăță evenimentele anterioare
+    if (this.videoEventListeners) {
+      this.videoEventListeners.forEach(({ element, event, handler }) => {
+        element.removeEventListener(event, handler);
+      });
+    }
+    this.videoEventListeners = [];
 
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
@@ -602,7 +696,7 @@ class JutsuExtension {
     }, 1000);
 
     const setupVideoEvents = () => {
-      video.addEventListener('play', () => {
+      const playHandler = () => {
         if (!this.isHostControl || this.isHost) {
           try {
             this.ws.send(JSON.stringify({
@@ -614,9 +708,9 @@ class JutsuExtension {
             console.error('Error sending play sync:', error);
           }
         }
-      });
+      };
 
-      video.addEventListener('pause', () => {
+      const pauseHandler = () => {
         if (!this.isHostControl || this.isHost) {
           try {
             this.ws.send(JSON.stringify({
@@ -628,13 +722,13 @@ class JutsuExtension {
             console.error('Error sending pause sync:', error);
           }
         }
-      });
+      };
 
-      video.addEventListener('seeking', () => {
+      const seekingHandler = () => {
         this.isSeeking = true;
-      });
+      };
 
-      video.addEventListener('seeked', () => {
+      const seekedHandler = () => {
         if (!this.isHostControl || this.isHost) {
           const currentTime = video.currentTime;
           if (Math.abs(currentTime - this.lastSyncTime) > 0.5) {
@@ -652,28 +746,74 @@ class JutsuExtension {
           }
         }
         this.isSeeking = false;
-      });
+      };
+
+      video.addEventListener('play', playHandler);
+      video.addEventListener('pause', pauseHandler);
+      video.addEventListener('seeking', seekingHandler);
+      video.addEventListener('seeked', seekedHandler);
+
+      // Salvează referințele pentru curățare ulterioară
+      this.videoEventListeners = [
+        { element: video, event: 'play', handler: playHandler },
+        { element: video, event: 'pause', handler: pauseHandler },
+        { element: video, event: 'seeking', handler: seekingHandler },
+        { element: video, event: 'seeked', handler: seekedHandler }
+      ];
     };
 
     setupVideoEvents();
 
     // Monitor URL changes
     let lastUrl = window.location.href;
-    setInterval(() => {
+    if (this.urlMonitorInterval) {
+      clearInterval(this.urlMonitorInterval);
+    }
+
+    this.urlMonitorInterval = setInterval(() => {
       if (lastUrl !== window.location.href) {
         lastUrl = window.location.href;
         this.isReconnecting = true;
+        
+        // Curăță sincronizarea curentă
+        if (this.syncInterval) {
+          clearInterval(this.syncInterval);
+        }
+        
+        // Trimite URL change și apoi reconectează-te la cameră
         try {
           this.ws.send(JSON.stringify({
             type: 'url_change',
             url: window.location.href
           }));
+          
+          // Reconectează-te la cameră pe noul URL
+          setTimeout(() => {
+            if (this.isHost) {
+              this.ws.send(JSON.stringify({
+                type: 'create_room',
+                roomId: this.roomId,
+                url: window.location.href
+              }));
+            } else {
+              this.ws.send(JSON.stringify({
+                type: 'join_room',
+                roomId: this.roomId
+              }));
+            }
+          }, 500);
+          
         } catch (error) {
           console.error('Error sending URL change:', error);
         }
-        setTimeout(() => {
-          this.isReconnecting = false;
-        }, 1000);
+        
+        // Așteaptă ca noul video să fie disponibil și apoi reinițializează sincronizarea
+        this.checkVideo(() => {
+          this.setupVideoSync();
+          setTimeout(() => {
+            this.isReconnecting = false;
+          }, 1000);
+        });
       }
     }, 1000);
   }
@@ -713,6 +853,15 @@ class JutsuExtension {
   cleanup() {
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
+    }
+    if (this.urlMonitorInterval) {
+      clearInterval(this.urlMonitorInterval);
+    }
+    if (this.videoEventListeners) {
+      this.videoEventListeners.forEach(({ element, event, handler }) => {
+        element.removeEventListener(event, handler);
+      });
+      this.videoEventListeners = [];
     }
   }
 }

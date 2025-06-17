@@ -12,7 +12,7 @@
     "action": {
       "default_popup":"./pages/popup.html"
     },
-    "permissions": ["storage"],
+    "permissions": ["storage", "tabs"],
     "content_scripts": [
         {
           "css":[

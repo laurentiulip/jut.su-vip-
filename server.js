@@ -31,18 +31,42 @@ wss.on('connection', (ws) => {
                         currentUrl: data.url,
                         isHostControl: false
                     });
+                    currentRoom = roomId;
+                    ws.send(JSON.stringify({
+                        type: 'room_created',
+                        roomId: roomId,
+                        clientId: clientId
+                    }));
                 } else {
                     const room = rooms.get(roomId);
-                    room.host = ws;
-                    room.clients.add(ws);
+                    // Dacă clientul este deja în cameră, doar actualizează
+                    if (!room.clients.has(ws)) {
+                        room.clients.add(ws);
+                    }
+                    if (ws === room.host || data.isHost) {
+                        room.host = ws;
+                    }
                     room.currentUrl = data.url;
+                    currentRoom = roomId;
+                    
+                    ws.send(JSON.stringify({
+                        type: 'room_created',
+                        roomId: roomId,
+                        clientId: clientId,
+                        isReconnection: true
+                    }));
+                    
+                    // Notifică ceilalți despre reconectare
+                    room.clients.forEach(client => {
+                        if (client !== ws && client.readyState === WebSocket.OPEN) {
+                            client.send(JSON.stringify({
+                                type: 'user_reconnected',
+                                clientId: clientId,
+                                currentUrl: room.currentUrl
+                            }));
+                        }
+                    });
                 }
-                currentRoom = roomId;
-                ws.send(JSON.stringify({
-                    type: 'room_created',
-                    roomId: roomId,
-                    clientId: clientId
-                }));
                 break;
 
             case 'join_room':
@@ -106,6 +130,9 @@ wss.on('connection', (ws) => {
                 const urlRoom = rooms.get(currentRoom);
                 if (urlRoom) {
                     urlRoom.currentUrl = data.url;
+                    
+                    // Nu elimina clientul din cameră la schimbarea URL-ului
+                    // Doar actualizează URL-ul și notifică ceilalți
                     urlRoom.clients.forEach(client => {
                         if (client !== ws && client.readyState === WebSocket.OPEN) {
                             client.send(JSON.stringify({
