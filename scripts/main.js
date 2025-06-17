@@ -316,17 +316,25 @@ class JutsuExtension {
     this.intervalIds.push(checkSkipIntroBtnVisible);
   }
 
-  initSync() {
+    initSync() {
     if (this.ws) {
-      try {
-        this.ws.close();
-      } catch (error) {
-        console.error('Error closing existing connection:', error);
-      }
+        try {
+            this.ws.close();
+        } catch (error) {
+            console.error('Error closing existing connection:', error);
+        }
     }
 
-    try {
-      this.ws = new WebSocket('ws://localhost:3000');
+    // Detectează environment-ul
+    const isProduction = window.location.protocol === 'https:' || 
+                        window.location.hostname !== 'localhost';
+    
+    const wsUrl = isProduction 
+        ? 'wss://your-app-name.onrender.com'  // Vei schimba asta după deploy
+        : 'ws://localhost:3000';
+
+        try {
+        this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
         console.log('Connected to sync server');
