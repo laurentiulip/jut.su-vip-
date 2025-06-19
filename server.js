@@ -203,21 +203,21 @@ wss.on('connection', (ws) => {
                 setTimeout(() => {
                     // Verifică dacă clientul s-a reconectat
                     if (room.clients.has(ws) && ws.readyState !== WebSocket.OPEN) {
-                        room.clients.delete(ws);
+                room.clients.delete(ws);
                         
-                        if (room.clients.size === 0) {
-                            rooms.delete(currentRoom);
+                if (room.clients.size === 0) {
+                    rooms.delete(currentRoom);
                             console.log(`Room ${currentRoom} deleted - no clients`);
-                        } else {
+                } else {
                             // Notifică clienții rămași
-                            room.clients.forEach(client => {
-                                if (client.readyState === WebSocket.OPEN) {
-                                    client.send(JSON.stringify({
-                                        type: 'user_left',
-                                        clientId: clientId
-                                    }));
-                                }
-                            });
+                    room.clients.forEach(client => {
+                        if (client.readyState === WebSocket.OPEN) {
+                            client.send(JSON.stringify({
+                                type: 'user_left',
+                                clientId: clientId
+                            }));
+                        }
+                    });
                             
                             // Dacă host-ul a plecat, alege unul nou
                             if (room.host === ws) {

@@ -9,7 +9,6 @@ class JutsuExtension {
     this.roomId = null;
     this.clientId = null;
     this.connectedUsers = new Set();
-    this.isHostControl = false;
     this.isSeeking = false;
     this.lastSyncTime = 0;
     this.syncInterval = null;
@@ -38,6 +37,14 @@ class JutsuExtension {
           }
         }
       }
+      if (request.action === 'getRoomControlsState') {
+        const existingControls = document.querySelector('.room-controls-container');
+        let isVisible = false;
+        if (existingControls && existingControls.style.display !== 'none') {
+          isVisible = true;
+        }
+        sendResponse({ visible: isVisible });
+      }
     });
   }
 
@@ -49,7 +56,6 @@ class JutsuExtension {
         this.roomId = state.roomId;
         this.isHost = state.isHost;
         this.clientId = state.clientId;
-        this.isHostControl = state.isHostControl;
         console.log('Loaded room state:', state);
       }
     } catch (error) {
@@ -64,7 +70,6 @@ class JutsuExtension {
         roomId: this.roomId,
         isHost: this.isHost,
         clientId: this.clientId,
-        isHostControl: this.isHostControl
       };
       localStorage.setItem('jutsuRoomState', JSON.stringify(state));
       console.log('Saved room state:', state);
@@ -80,7 +85,6 @@ class JutsuExtension {
       this.isHost = false;
       this.clientId = null;
       this.connectedUsers.clear();
-      this.isHostControl = false;
       console.log('Cleared room state');
     } catch (error) {
       console.error('Error clearing room state:', error);
@@ -353,8 +357,14 @@ class JutsuExtension {
               type: 'join_room',
               roomId: this.roomId
             }));
+            // Pentru member după refresh, inițializează sincronizarea
+            setTimeout(() => {
+              this.checkVideo(() => {
+                this.setupVideoSync();
+                this.isReconnecting = false;
+              });
+            }, 500);
           }
-          
           // Pentru host după refresh, inițializează sincronizarea
           if (this.isHost) {
             setTimeout(() => {
@@ -432,6 +442,13 @@ class JutsuExtension {
             case 'user_joined':
               this.connectedUsers.add(data.clientId);
               this.updateRoomInfo();
+              // Dacă suntem member și ne-am reconectat, reinițializează sincronizarea
+              if (!this.isHost && this.isReconnecting) {
+                this.checkVideo(() => {
+                  this.setupVideoSync();
+                  this.isReconnecting = false;
+                });
+              }
               if (data.currentUrl !== window.location.href && !this.isReconnecting) {
                 window.location.href = data.currentUrl;
               }
@@ -447,18 +464,17 @@ class JutsuExtension {
               break;
 
             case 'url_change':
-              if (data.url !== window.location.href && !this.isReconnecting) {
+              console.log('URL change received:', data.url, 'Current URL:', window.location.href);
+              if (data.url !== window.location.href) {
+                console.log('Navigating to new URL:', data.url);
+                // Setează flag-ul de reconectare
+                this.isReconnecting = true;
+                // Schimbă URL-ul
                 window.location.href = data.url;
               } else if (data.url === window.location.href) {
                 // Dacă suntem deja pe URL-ul corect, doar reinițializează sincronizarea
                 this.reinitializeSync();
               }
-              break;
-
-            case 'host_control_toggled':
-              this.isHostControl = data.isHostControl;
-              this.saveRoomState();
-              this.updateRoomInfo();
               break;
           }
         } catch (error) {
@@ -474,29 +490,27 @@ class JutsuExtension {
     const video = document.getElementById("my-player_html5_api");
     if (!video || this.isSeeking) return;
 
-    if (!this.isHostControl || !this.isHost) {
-      try {
-        switch(data.action) {
-          case 'play':
-            if (video.paused) {
-              video.play().catch(error => console.error('Error playing video:', error));
-            }
-            break;
-          case 'pause':
-            if (!video.paused) {
-              video.pause();
-            }
-            break;
-          case 'seek':
-            if (Math.abs(video.currentTime - data.time) > 0.5) {
-              video.currentTime = data.time;
-              this.lastSyncTime = data.time;
-            }
-            break;
-        }
-      } catch (error) {
-        console.error('Error handling sync:', error);
+    try {
+      switch(data.action) {
+        case 'play':
+          if (video.paused) {
+            video.play().catch(error => console.error('Error playing video:', error));
+          }
+          break;
+        case 'pause':
+          if (!video.paused) {
+            video.pause();
+          }
+          break;
+        case 'seek':
+          if (Math.abs(video.currentTime - data.time) > 0.5) {
+            video.currentTime = data.time;
+            this.lastSyncTime = data.time;
+          }
+          break;
       }
+    } catch (error) {
+      console.error('Error handling sync:', error);
     }
   }
 
@@ -542,18 +556,6 @@ class JutsuExtension {
     joinRoomBtn.textContent = 'Join Room';
     joinRoomBtn.onclick = () => this.joinRoom(joinRoomInput.value);
 
-    // Host control toggle
-    const hostControlToggle = document.createElement('div');
-    hostControlToggle.style.marginTop = '10px';
-    const hostControlLabel = document.createElement('label');
-    hostControlLabel.textContent = 'Host Control Only: ';
-    const hostControlCheckbox = document.createElement('input');
-    hostControlCheckbox.type = 'checkbox';
-    hostControlCheckbox.checked = this.isHostControl;
-    hostControlCheckbox.onchange = () => this.toggleHostControl(hostControlCheckbox.checked);
-    hostControlLabel.appendChild(hostControlCheckbox);
-    hostControlToggle.appendChild(hostControlLabel);
-
     // Leave room button
     const leaveRoomBtn = document.createElement('button');
     leaveRoomBtn.textContent = 'Leave Room';
@@ -570,7 +572,6 @@ class JutsuExtension {
     controlsContainer.appendChild(createRoomBtn);
     controlsContainer.appendChild(joinRoomInput);
     controlsContainer.appendChild(joinRoomBtn);
-    controlsContainer.appendChild(hostControlToggle);
     controlsDiv.appendChild(leaveRoomBtn);
     document.body.appendChild(controlsDiv);
 
@@ -586,7 +587,6 @@ class JutsuExtension {
       info += `Room: ${this.roomId}<br>`;
       info += `Your ID: ${this.clientId}<br>`;
       info += `Connected Users: ${this.connectedUsers.size}<br>`;
-      info += `Host Control: ${this.isHostControl ? 'Enabled' : 'Disabled'}<br>`;
       info += `Status: ${this.isHost ? 'Host' : 'Member'}`;
     } else {
       info = 'Not in a room';
@@ -627,14 +627,6 @@ class JutsuExtension {
     if (controlsContainer) {
       controlsContainer.style.display = 'none';
     }
-  }
-
-  toggleHostControl(enabled) {
-    this.isHostControl = enabled;
-    this.ws.send(JSON.stringify({
-      type: 'toggle_host_control',
-      isHostControl: enabled
-    }));
   }
 
   leaveRoom() {
@@ -683,7 +675,7 @@ class JutsuExtension {
     }
 
     this.syncInterval = setInterval(() => {
-      if (video && !this.isSeeking && (!this.isHostControl || this.isHost)) {
+      if (video && !this.isSeeking) {
         const currentTime = video.currentTime;
         if (Math.abs(currentTime - this.lastSyncTime) > 0.5) {
           try {
@@ -703,30 +695,26 @@ class JutsuExtension {
 
     const setupVideoEvents = () => {
       const playHandler = () => {
-        if (!this.isHostControl || this.isHost) {
-          try {
-            this.ws.send(JSON.stringify({
-              type: 'sync',
-              action: 'play',
-              url: window.location.href
-            }));
-          } catch (error) {
-            console.error('Error sending play sync:', error);
-          }
+        try {
+          this.ws.send(JSON.stringify({
+            type: 'sync',
+            action: 'play',
+            url: window.location.href
+          }));
+        } catch (error) {
+          console.error('Error sending play sync:', error);
         }
       };
 
       const pauseHandler = () => {
-        if (!this.isHostControl || this.isHost) {
-          try {
-            this.ws.send(JSON.stringify({
-              type: 'sync',
-              action: 'pause',
-              url: window.location.href
-            }));
-          } catch (error) {
-            console.error('Error sending pause sync:', error);
-          }
+        try {
+          this.ws.send(JSON.stringify({
+            type: 'sync',
+            action: 'pause',
+            url: window.location.href
+          }));
+        } catch (error) {
+          console.error('Error sending pause sync:', error);
         }
       };
 
@@ -735,20 +723,18 @@ class JutsuExtension {
       };
 
       const seekedHandler = () => {
-        if (!this.isHostControl || this.isHost) {
-          const currentTime = video.currentTime;
-          if (Math.abs(currentTime - this.lastSyncTime) > 0.5) {
-            try {
-              this.ws.send(JSON.stringify({
-                type: 'sync',
-                action: 'seek',
-                time: currentTime,
-                url: window.location.href
-              }));
-              this.lastSyncTime = currentTime;
-            } catch (error) {
-              console.error('Error sending seek sync:', error);
-            }
+        const currentTime = video.currentTime;
+        if (Math.abs(currentTime - this.lastSyncTime) > 0.5) {
+          try {
+            this.ws.send(JSON.stringify({
+              type: 'sync',
+              action: 'seek',
+              time: currentTime,
+              url: window.location.href
+            }));
+            this.lastSyncTime = currentTime;
+          } catch (error) {
+            console.error('Error sending seek sync:', error);
           }
         }
         this.isSeeking = false;
@@ -780,39 +766,25 @@ class JutsuExtension {
       if (lastUrl !== window.location.href) {
         lastUrl = window.location.href;
         this.isReconnecting = true;
-        
-        // Curăță sincronizarea curentă
-        if (this.syncInterval) {
-          clearInterval(this.syncInterval);
-        }
-        
-        // Trimite URL change și apoi reconectează-te la cameră
-        try {
-          this.ws.send(JSON.stringify({
-            type: 'url_change',
-            url: window.location.href
-          }));
-          
-          // Reconectează-te la cameră pe noul URL
-          setTimeout(() => {
-            if (this.isHost) {
+        // Trimite URL change doar dacă suntem host
+        if (this.isHost) {
+          try {
+            this.ws.send(JSON.stringify({
+              type: 'url_change',
+              url: window.location.href
+            }));
+            // Reconectează-te la cameră pe noul URL
+            setTimeout(() => {
               this.ws.send(JSON.stringify({
                 type: 'create_room',
                 roomId: this.roomId,
                 url: window.location.href
               }));
-            } else {
-              this.ws.send(JSON.stringify({
-                type: 'join_room',
-                roomId: this.roomId
-              }));
-            }
-          }, 500);
-          
-        } catch (error) {
-          console.error('Error sending URL change:', error);
+            }, 500);
+          } catch (error) {
+            console.error('Error sending URL change:', error);
+          }
         }
-        
         // Așteaptă ca noul video să fie disponibil și apoi reinițializează sincronizarea
         this.checkVideo(() => {
           this.setupVideoSync();

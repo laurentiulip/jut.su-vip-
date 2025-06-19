@@ -287,3 +287,30 @@ document.getElementById('roomControls').addEventListener('change', () => {
     }
   });
 });
+
+// Sincronizare stare Room Controls la deschiderea popup-ului
+function syncRoomControlsCheckbox() {
+  chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+    const currentTab = tabs[0];
+    if (currentTab && currentTab.url.includes('jut.su')) {
+      chrome.tabs.sendMessage(currentTab.id, {action: 'getRoomControlsState'}, (response) => {
+        if (chrome.runtime.lastError) {
+          // Tab-ul nu e content script valid sau nu răspunde
+          return;
+        }
+        const checkbox = document.getElementById('roomControls');
+        if (!checkbox) return;
+        // Dezactivează temporar handlerul de change
+        const oldHandler = checkbox.onchange;
+        checkbox.onchange = null;
+        checkbox.checked = !!(response && response.visible);
+        // Reatașează handlerul după un scurt delay
+        setTimeout(() => {
+          checkbox.onchange = oldHandler;
+        }, 100);
+      });
+    }
+  });
+}
+
+document.addEventListener('DOMContentLoaded', syncRoomControlsCheckbox);
