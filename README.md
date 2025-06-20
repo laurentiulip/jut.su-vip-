@@ -1,6 +1,6 @@
 <div align=center>
    <img width=150 src=https://github.com/DenisGas/jut.su_next-series/blob/main/img/icon.png?raw=true alt='logo' />
-   <h1>jut.su Next-Series V2.4.1</h1>
+   <h1>jut.su Next-Series BETA</h1>
 </div>
 
 <div align=center>
@@ -15,7 +15,7 @@
 
 ## Description
 
-Chrome extension for [Jut.su](https://jut.su/) which makes video auto-play, auto-skip anime intro, and auto-open next series after the end of the current one.
+Forked project Chrome extension for [Jut.su](https://jut.su/) which makes video auto-play, auto-skip anime intro, and auto-open next series after the end of the current one(BETA live watching anime with friends). 
 
 If you want the anime to go FullScreen automatically, I made a [python script](https://github.com/DenisGas/watch_jut.su) that does that.
 
@@ -26,12 +26,14 @@ If you want the anime to go FullScreen automatically, I made a [python script](h
 - Open next episode 🤩
 - One click to FullScreen(Overlay) 👍
 - Video hotkey work (Press "F" to fullScreen) ❤️
+- live watching with friends
 
 
 ## Installation
 
 [download from chrome store](https://chromewebstore.google.com/detail/jutsu-next-series/godmnckhgkgojikjpiahppfnmhgkfpjp)
 
+forked version download manual the project on pc and open browser settings extensions turn on developer mode and upload extension
 ## Usage
 
 ### Phone
